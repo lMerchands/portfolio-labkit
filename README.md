@@ -153,4 +153,4 @@ tests/             pruebas con datos sintéticos (sin red)
 
 ## Créditos
 
-El código original (`yahoo_data.py`, `Methodologies_Port.py` y `metrics_portfolio.py`) fue escrito por **camilocastillo** (agosto de 2025), como indican los encabezados de los archivos. `YahooData`, `Portfolio` (antes `Do_portfolio`) y `metrics` parten de esa base; el historial de git muestra cada cambio.
+El código original (`yahoo_data.py`, `Methodologies_Port.py` y `metrics_portfolio.py`) fue escrito por **camilocastillo** ([CamiloCastillo88/Portfolio](https://github.com/CamiloCastillo88/Portfolio), agosto de 2025), como indican los encabezados de los archivos. `YahooData`, `Portfolio` (antes `Do_portfolio`) y `metrics` parten de esa base; el historial de git muestra cada cambio.
