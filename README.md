@@ -14,6 +14,8 @@ pip install -e .
 
 `pip install -e .` instala el paquete y sus dependencias (`numpy`, `pandas`, `yfinance`, `matplotlib`, `seaborn`, `statsmodels`, `scipy`, `scikit-learn`, `joblib`, `pyportfolioopt`). Para correr las pruebas: `pip install -e ".[dev]"` y `pytest`.
 
+> Si tu carpeta está en un directorio sincronizado con iCloud (Documentos en macOS), crea el entorno virtual fuera de él (por ejemplo `~/.venvs/portfolio-labkit`): macOS puede vaciar archivos del `.venv` y Python se queda esperando a que se descarguen.
+
 Como el paquete está instalado, se puede importar desde cualquier carpeta o cuaderno de ese entorno.
 
 ## Guía rápida de inicio a fin
@@ -138,6 +140,38 @@ w = p.optimize_bl('merton', gamma=3, rf=0.04)
 
 La implementación se verifica contra `pypfopt.BlackLittermanModel` en las pruebas.
 
+## 7. Métricas del portafolio y riesgo (VaR/CVaR histórico)
+
+Con los pesos de cualquier método (`markowitz`, `merton`, `hrp`, `optimize_bl`) guardados en `p.weights`, o con pesos propios (`weights=[0.4, 0.4, 0.2]`):
+
+```python
+p.markowitz('max_sharpe', rf=0.04)
+p.report(rf=0.04)                                   # retorno, vol, CV, Sharpe, VaR y CVaR al 95% y 99%
+p.report(rf=0.04, horizon=10, value=1_000_000)      # a 10 días y en dinero
+p.var(0.05); p.cvar(0.05)                           # un solo nivel
+p.portfolio_returns(kind='log')                     # retornos diarios del portafolio
+p.portfolio_value()                                 # valor acumulado, base 100
+```
+
+- **Retorno, volatilidad, CV, Sharpe:** anualizados (`periods_per_year`), con `rf` anual.
+- **VaR histórico:** pérdida en el cuantil `alpha` de los retornos diarios del portafolio (rebalanceo diario a pesos fijos). Se reporta como número positivo: 0.019 significa perder 1.9%. Acepta `alpha=0.05` o `0.95`.
+- **CVaR (expected shortfall):** pérdida promedio de los días que superan el VaR; siempre ≥ VaR.
+- **Horizonte** `horizon_method='sqrt'` escala el VaR de 1 día por √h; `'rolling'` usa sumas móviles de h retornos (sin supuesto de distribución, pero con ventanas solapadas y necesita ≥ 100).
+- Funciones sueltas sobre cualquier serie de retornos: `from portfolio_labkit.risk import historical_var, historical_cvar, risk_table`.
+
+> El VaR/CVaR simulado con t de Student y movimiento browniano (colas más pesadas que la normal) queda como siguiente etapa.
+
+## 8. Pronóstico del portafolio completo
+
+```python
+fc = p.forecast(30, order=(1, 1, 1))                       # valor del portafolio (base 100) a 30 días
+fc = p.forecast(20, order=(1, 0, 1), kind='log')           # retornos logarítmicos diarios
+gs = p.grid_search(p=2, d=[0], q=2, criterion='bic')       # mejor SARIMA para el portafolio
+fit = p.fit_sarima(order=(2, 1, 1)); fit.summary()
+```
+
+Usa los mismos modelos y el mismo grid search paralelo de la sección 4, aplicados a la serie del portafolio con los pesos actuales. Con `kind='price'` los intervalos son del valor del portafolio; con `kind='log'` son de cada día y no se acumulan.
+
 ## Estructura
 
 ```
@@ -146,7 +180,8 @@ portfolio_labkit/
   plots.py         gráficas seaborn
   timeseries.py    ACF/PACF, Ljung-Box, ADF, descomposición
   forecasting.py   SARIMA y grid search paralelo
-  portfolio.py     Portfolio y Black–Litterman
+  portfolio.py     Portfolio, Black–Litterman, métricas y forecast del portafolio
+  risk.py          VaR y CVaR históricos
   metrics.py       métricas anualizadas
 tests/             pruebas con datos sintéticos (sin red)
 ```
