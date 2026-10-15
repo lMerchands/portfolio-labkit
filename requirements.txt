@@ -1,0 +1,11 @@
+numpy
+pandas
+yfinance
+matplotlib
+seaborn
+statsmodels
+scipy
+scikit-learn
+joblib
+pyportfolioopt
+pytest

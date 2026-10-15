@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "portfolio-labkit"
+version = "0.1.0"
+description = "Descarga de datos de Yahoo Finance, análisis de series de tiempo, SARIMA y optimización de portafolios"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy", "pandas", "yfinance", "matplotlib", "seaborn",
+    "statsmodels", "scipy", "scikit-learn", "joblib", "pyportfolioopt",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["portfolio_labkit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
