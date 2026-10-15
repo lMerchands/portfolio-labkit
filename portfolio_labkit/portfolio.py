@@ -6,6 +6,7 @@ forma consistente, retornos calculados una sola vez, pesos devueltos como
 pd.Series, EfficientFrontier clásico de pypfopt y Black-Litterman.
 """
 
+import warnings
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -427,3 +428,101 @@ class Portfolio:
         w = self.weights if weights is None else weights
         return annualize_stats(self.rets, np.asarray(w, dtype=float), rf=rf,
                                periods_per_year=self.ppy)
+
+    # ------------------------------------------------- serie del portafolio
+    def _weights_or_default(self, weights) -> pd.Series:
+        """Pesos indicados, los de `self.weights`, o iguales si todos son cero."""
+        if weights is None:
+            weights = self.weights
+        w = pd.Series(np.asarray(weights, dtype=float), index=self.tickers)
+        if np.allclose(w.values, 0):
+            warnings.warn('Los pesos son todos cero: uso pesos iguales.', stacklevel=3)
+            w = pd.Series(1.0 / len(self.tickers), index=self.tickers)
+        return w
+
+    def portfolio_returns(self, weights=None, kind: str = 'log') -> pd.Series:
+        """Retorno diario del portafolio con pesos fijos (rebalanceo diario).
+
+        Se agrega con los retornos simples de los activos (exacto) y, si
+        kind='log', se convierte con log1p. weights=None usa `self.weights`.
+        """
+        if kind not in ('log', 'simple'):
+            raise ValueError("kind debe ser 'log' o 'simple'")
+        w = self._weights_or_default(weights)
+        simple = (self.prices.pct_change().dropna() @ w).rename('portfolio')
+        return np.log1p(simple) if kind == 'log' else simple
+
+    def portfolio_value(self, weights=None, base: float = 100.0) -> pd.Series:
+        """Valor del portafolio en el tiempo, empezando en `base`."""
+        r = self.portfolio_returns(weights, kind='simple')
+        value = base * (1 + r).cumprod()
+        start = pd.Series([base], index=[self.prices.index[0]])
+        return pd.concat([start, value]).rename('portfolio_value')
+
+    # ------------------------------------------------------- riesgo (VaR/CVaR)
+    def var(self, alpha: float = 0.05, horizon: int = 1, horizon_method: str = 'sqrt',
+            weights=None) -> float:
+        """VaR histórico del portafolio (pérdida positiva). Ver risk.historical_var."""
+        from .risk import historical_var
+        return historical_var(self.portfolio_returns(weights), alpha, horizon, horizon_method)
+
+    def cvar(self, alpha: float = 0.05, horizon: int = 1, horizon_method: str = 'sqrt',
+             weights=None) -> float:
+        """CVaR histórico del portafolio (pérdida positiva). Ver risk.historical_cvar."""
+        from .risk import historical_cvar
+        return historical_cvar(self.portfolio_returns(weights), alpha, horizon, horizon_method)
+
+    def report(self, weights=None, rf: float = 0.01, alphas: Iterable[float] = (0.95, 0.99),
+               horizon: int = 1, horizon_method: str = 'sqrt',
+               value: Optional[float] = None) -> pd.Series:
+        """Resumen: retorno, volatilidad, CV y Sharpe anualizados, más VaR y CVaR.
+
+        VaR y CVaR (históricos, del portafolio con estos pesos) se calculan en
+        el horizonte indicado, en días, y para cada nivel de confianza en `alphas`.
+        value: monto del portafolio; agrega VaR y CVaR en dinero.
+        """
+        from .risk import risk_table
+        w = self._weights_or_default(weights)
+        m = annualize_stats(self.rets, w.values, rf=rf, periods_per_year=self.ppy)
+        out = {'ann_return': m.ann_return, 'ann_vol': m.ann_vol, 'cv': m.cv, 'sharpe': m.sharpe}
+        table = risk_table(self.portfolio_returns(w), alphas, horizon, horizon_method, value)
+        for conf, row in table.iterrows():
+            for col, v in row.items():
+                out[f'{col}_{conf}'] = v
+        return pd.Series(out, name='portfolio')
+
+    # ------------------------------------------------------------- forecast
+    def _forecast_series(self, weights, kind: str) -> pd.Series:
+        if kind == 'price':
+            return self.portfolio_value(weights)
+        if kind == 'log':
+            return self.portfolio_returns(weights, kind='log')
+        raise ValueError("kind debe ser 'price' (valor del portafolio) o 'log' (retornos)")
+
+    def fit_sarima(self, order=(1, 1, 1), seasonal_order=(0, 0, 0, 0), kind: str = 'price',
+                   weights=None, **kwargs):
+        """Ajusta un SARIMA al portafolio completo (ver forecasting.fit_sarima).
+
+        kind: 'price' modela el valor del portafolio (usa d=1); 'log' modela
+        sus retornos logarítmicos (usa d=0).
+        """
+        from .forecasting import fit_sarima
+        return fit_sarima(self._forecast_series(weights, kind), order, seasonal_order, **kwargs)
+
+    def forecast(self, steps: int = 30, order=(1, 1, 1), seasonal_order=(0, 0, 0, 0),
+                 kind: str = 'price', weights=None, alpha: float = 0.05, plot: bool = True):
+        """Pronostica el portafolio completo con SARIMA; devuelve el DataFrame del pronóstico.
+
+        kind='price': valor del portafolio (base 100) con su intervalo de confianza.
+        kind='log': retornos logarítmicos diarios (el intervalo es de cada día
+        y no se acumula).
+        """
+        fit = self.fit_sarima(order, seasonal_order, kind, weights)
+        if plot:
+            return fit.plot_forecast(steps, alpha)[0]
+        return fit.forecast(steps, alpha)
+
+    def grid_search(self, weights=None, kind: str = 'log', **kwargs):
+        """Búsqueda en malla del mejor SARIMA para el portafolio (ver forecasting.grid_search_sarima)."""
+        from .forecasting import grid_search_sarima
+        return grid_search_sarima(self._forecast_series(weights, kind), **kwargs)

@@ -157,3 +157,71 @@ def test_portfolio_black_litterman_pipeline(port):
         port.black_litterman()
     with pytest.raises(ValueError):
         Portfolio(port.prices).optimize_bl()
+
+
+# ------------------------------------------- serie, riesgo y forecast del portafolio
+
+def test_portfolio_returns_match_manual(port, prices):
+    w = pd.Series([0.5, 0.3, 0.2], index=port.tickers)
+    manual = (prices.pct_change().dropna() * w).sum(axis=1)
+    assert np.allclose(port.portfolio_returns(w, 'simple'), manual)
+    assert np.allclose(port.portfolio_returns(w, 'log'), np.log1p(manual))
+    with pytest.raises(ValueError):
+        port.portfolio_returns(w, 'x')
+
+
+def test_single_asset_weight_reproduces_asset(port, prices):
+    r = port.portfolio_returns([1, 0, 0], 'simple')
+    assert np.allclose(r, prices['AAA'].pct_change().dropna())
+
+
+def test_portfolio_value(port, prices):
+    w = [0.4, 0.4, 0.2]
+    v = port.portfolio_value(w)
+    assert v.iloc[0] == 100 and len(v) == len(prices)
+    assert np.isclose(v.iloc[-1], 100 * (1 + port.portfolio_returns(w, 'simple')).prod())
+
+
+def test_zero_weights_fall_back_to_equal(port):
+    with pytest.warns(UserWarning):
+        r = port.portfolio_returns()
+    assert np.allclose(r, port.portfolio_returns([1 / 3] * 3))
+
+
+def test_report_columns_and_consistency(port):
+    w = port.markowitz('min_vol')
+    rep = port.report(rf=0.02)
+    m = port.metrics(w, rf=0.02)
+    assert rep['ann_return'] == pytest.approx(m.ann_return)
+    assert rep['ann_vol'] == pytest.approx(m.ann_vol)
+    assert rep['sharpe'] == pytest.approx(m.sharpe)
+    assert rep['cv'] == pytest.approx(m.cv)
+    for c in ('VaR_95%', 'CVaR_95%', 'VaR_99%', 'CVaR_99%'):
+        assert c in rep.index
+    assert rep['VaR_99%'] > rep['VaR_95%'] and rep['CVaR_95%'] >= rep['VaR_95%']
+    assert rep['VaR_95%'] == pytest.approx(port.var(0.05))
+    assert rep['CVaR_99%'] == pytest.approx(port.cvar(0.01))
+
+
+def test_report_horizon_and_value(port):
+    w = [0.4, 0.4, 0.2]
+    r1, r10 = port.report(w), port.report(w, horizon=10)
+    assert r10['VaR_95%'] == pytest.approx(r1['VaR_95%'] * np.sqrt(10))
+    assert port.report(w, value=1e6)['VaR_monto_95%'] == pytest.approx(r1['VaR_95%'] * 1e6)
+
+
+def test_forecast_price_and_log(port):
+    port.markowitz('min_vol')
+    fc = port.forecast(10, order=(1, 1, 0), plot=False)
+    assert len(fc) == 10
+    assert ((fc['lower'] < fc['forecast']) & (fc['forecast'] < fc['upper'])).all()
+    fc = port.forecast(5, order=(1, 0, 0), kind='log', plot=True)
+    assert len(fc) == 5
+    plt.close('all')
+    with pytest.raises(ValueError):
+        port.forecast(5, kind='x')
+
+
+def test_portfolio_grid_search(port):
+    res = port.grid_search([0.5, 0.3, 0.2], p=1, d=[0], q=1, n_jobs=1)
+    assert len(res.table) == 4 and res.table['aic'].is_monotonic_increasing
